@@ -31,7 +31,7 @@ public class SlidingBoundedBuffer<T> {
     final Condition notEmpty = lock.newCondition();
     
     public SlidingBoundedBuffer() {
-        this(64);
+        this(Integer.MAX_VALUE);
     }
 
     @SuppressWarnings("unchecked")
@@ -44,9 +44,28 @@ public class SlidingBoundedBuffer<T> {
         elements = (T[]) new Object[maxSize];
     }
     
+    /**
+     * Returns the capacity of this buffer.
+     *
+     * @return the capacity of this buffer
+     */
     public int getBufferSize() {
         return elements.length;
-    }  
+    }
+
+    /**
+     * Returns the number of elements in this buffer.
+     *
+     * @return the number of elements in this buffer
+     */
+    public int getCurrentCount() {
+        lock.lock();
+        try {
+            return currentCount;
+        } finally {
+            lock.unlock();
+        }
+    }
     
     /**
      * Adds a new element to the tail of the buffer. 
@@ -65,8 +84,8 @@ public class SlidingBoundedBuffer<T> {
             elements[tailIndex] = newElement;
             tailIndex = (tailIndex + 1) % elements.length;
             
-            // the oldest element just got overriden
             if (currentCount == elements.length) {
+                //the oldest element just got overriden so we need to adjust the index:
                 headIndex = (headIndex + 1) % elements.length;
             } else {
                 currentCount++;
@@ -105,6 +124,11 @@ public class SlidingBoundedBuffer<T> {
         }
     }  
     
+    /**
+     * Returns the oldest element or null in the buffer is empty. 
+     * For internal use only to avoid code duplication (not synchronized).
+     * @return the oldest element or null in the buffer is empty
+     */
     private T take() {
         if (currentCount == 0) {
             return null;

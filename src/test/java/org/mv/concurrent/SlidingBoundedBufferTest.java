@@ -99,7 +99,12 @@ public class SlidingBoundedBufferTest {
         
         // here newSeqNumber is appended to threadName just to mimic some unique (distinct) content 
         Element newElement = new Element(newSeqNumber, threadName, threadName + " : " + newSeqNumber);
-        sbb.put(newElement);
+        
+        try {
+            sbb.put(newElement);
+        } catch (/*Interrupted*/Exception e) {
+            log.debug("Writing thread got interrupted");
+        }        
         
         // this affects performance - use only when debugging
         ///log.trace("added: {}", newElement);
@@ -175,8 +180,8 @@ public class SlidingBoundedBufferTest {
         
         try {
             Thread.sleep(10);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (InterruptedException e) {
+            log.info("Reader delaying interrupted", e);
         } 
         
         // only one reading thread in this scenario:
@@ -186,8 +191,8 @@ public class SlidingBoundedBufferTest {
             executorService.awaitTermination(10, TimeUnit.SECONDS);
             executorService.shutdownNow();
             
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (InterruptedException e) {
+            log.info("Awaiting termination interrupted", e);
         }
     }
 

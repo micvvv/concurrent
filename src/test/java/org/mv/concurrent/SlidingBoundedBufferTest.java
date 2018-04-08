@@ -22,8 +22,10 @@ public class SlidingBoundedBufferTest {
     
     private static final Logger log = LoggerFactory.getLogger(SlidingBoundedBufferTest.class.getName());
     
+    /** Sample buffer element class */
     public static class Element {
 
+        /** sequental number (! own sequence is used for each writer thread) */
         private int seqNumber;
         private String creatorThreadName;
         private String content;
@@ -52,18 +54,27 @@ public class SlidingBoundedBufferTest {
         }
     }
 
-    private final int BUFFER_CAPACITY = 500;
+    private final int BUFFER_CAPACITY = 5000;
     private SlidingBoundedBuffer<Element> sbb = new SlidingBoundedBuffer<Element>(BUFFER_CAPACITY);
     
-    private final int numberOfPutThreads = 500;
-    private final int numberOfIterations = 10000;
+    /** The number of threads putting elements to the buffer */
+    private final int NUMBER_OF_WRITERS = 500;
+    /** The number of elements for each of the writing threads to put to the buffer */
+    private final int NUMBER_OF_ITERATIONS = 100000;
     
-    private final int THREAD_POOL_CAPACITY = numberOfPutThreads + 1; // + 1 reading thread
+    /** This limits maximun read blocking time (milliseconds) */
+    private final long MAX_READ_BLOCKING_TIME = 5000;
+    
+    private final int THREAD_POOL_CAPACITY = NUMBER_OF_WRITERS + 1; // + 1 reading thread
     private ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_CAPACITY);
+    
+    /** This limits the time of running the test (in seconds) - after this elapses all the threads to be shut down
+     * ! Increase this if using bigger number of threads and iterations or a weaker machine ! */
+    private final long AWAIT_TEST_TERMINATION_TIME = 20; 
 
-    private Map<String, Integer> perThreadCounters = new ConcurrentHashMap<String, Integer>(numberOfPutThreads);
+    private Map<String, Integer> perThreadCounters = new ConcurrentHashMap<String, Integer>(NUMBER_OF_WRITERS);
 
-    private Map<String, Integer> perThreadCountersForRead = new ConcurrentHashMap<String, Integer>(numberOfPutThreads);
+    private Map<String, Integer> perThreadCountersForRead = new ConcurrentHashMap<String, Integer>(NUMBER_OF_WRITERS);
     
     private Integer getIncrementWriteThreadCounter(String threadName) {
         
@@ -93,7 +104,7 @@ public class SlidingBoundedBufferTest {
         return counter;
     }
     
-    protected void putToBuffer() {
+    private void putToBuffer() {
         String threadName = Thread.currentThread().getName();
         int newSeqNumber = getIncrementWriteThreadCounter(threadName);
         
@@ -110,7 +121,9 @@ public class SlidingBoundedBufferTest {
         ///log.trace("added: {}", newElement);
     }
     
+    /** The order should be preserved - not 0 indicates bugs */
     private int outOfOrderCount = 0;
+    
     private void validateReadElementOrder(Element elementToValidate) {
         int currentSeqNumber = elementToValidate.getSeqNumber();
         int previousSeqNumber = getUpdateReadThreadCounter(elementToValidate.getCreatorThreadName(), currentSeqNumber);
@@ -122,10 +135,14 @@ public class SlidingBoundedBufferTest {
     }
     
     @Test
+    /** 
+     * Test for multiple writers and a single reader. The passing criteria is preserved order of 
+     * elements (for each one of the writing threads) when reading from the buffer.
+     */
     public void testConcurrency() {
 
         Runnable putWorker = () -> IntStream
-          .rangeClosed(1, numberOfIterations)
+          .rangeClosed(1, NUMBER_OF_ITERATIONS)
           .forEach(i -> putToBuffer());
          
         // reading in parallel (with one thread only):
@@ -140,7 +157,7 @@ public class SlidingBoundedBufferTest {
                 
                 try {
                     do {
-                        readElement = sbb.get();
+                        readElement = sbb.get(MAX_READ_BLOCKING_TIME);
                         
                         if (null != readElement) {
                             numberOfReadElements++;
@@ -149,8 +166,6 @@ public class SlidingBoundedBufferTest {
                             ///log.trace("read: {}", readElement);
                             
                             validateReadElementOrder(readElement);
-                        } else {//should never happen
-                            log.debug("'null' element encountered!");
                         }
                     } while (null != readElement);
                 
@@ -174,21 +189,15 @@ public class SlidingBoundedBufferTest {
         };
         
         // a number of writers
-        for (int i = 0; i < numberOfPutThreads; i++) {
+        for (int i = 0; i < NUMBER_OF_WRITERS; i++) {
             executorService.execute(putWorker);
         }
-        
-        try {
-            Thread.sleep(10);
-        } catch (InterruptedException e) {
-            log.info("Reader delaying interrupted", e);
-        } 
         
         // only one reading thread in this scenario:
         executorService.execute(readWorker);
         
         try {
-            executorService.awaitTermination(10, TimeUnit.SECONDS);
+            executorService.awaitTermination(AWAIT_TEST_TERMINATION_TIME, TimeUnit.SECONDS);
             executorService.shutdownNow();
             
         } catch (InterruptedException e) {
